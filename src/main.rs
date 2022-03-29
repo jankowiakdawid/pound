@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::io::{stdout, Write};
 use std::path::Path;
 use std::time::Duration;
@@ -270,7 +271,12 @@ impl CursorController {
                 self.cursor_y = self.cursor_y.saturating_sub(1);
             }
             KeyCode::Left => {
-                self.cursor_x = self.cursor_x.saturating_sub(1);
+                if self.cursor_x != 0 {
+                    self.cursor_x -= 1;
+                } else {
+                    self.cursor_y -= 1;
+                    self.cursor_x = editor_rows.get_row(self.cursor_y).len();
+                }
             }
             KeyCode::Down => {
                 if self.cursor_y < numbers_of_rows {
@@ -278,10 +284,15 @@ impl CursorController {
                 }
             }
             KeyCode::Right => {
-                if self.cursor_y < numbers_of_rows
-                    && self.cursor_x < editor_rows.get_row(self.cursor_y).len()
-                {
-                    self.cursor_x += 1;
+                if self.cursor_y < numbers_of_rows {
+                    match self.cursor_x.cmp(&editor_rows.get_row(self.cursor_y).len()) {
+                        Ordering::Less => self.cursor_x += 1,
+                        Ordering::Equal => {
+                            self.cursor_y += 1;
+                            self.cursor_x = 0;
+                        }
+                        _ => {}
+                    }
                 }
             }
             KeyCode::Home => {
