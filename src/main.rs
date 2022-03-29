@@ -224,7 +224,8 @@ impl Output {
         self.cursor_controller.scroll();
         queue!(self.editor_contents, cursor::Hide, cursor::MoveTo(0, 0))?;
         self.draw_rows();
-        let cursor_x = (self.cursor_controller.cursor_x - self.cursor_controller.column_offset) as u16;
+        let cursor_x =
+            (self.cursor_controller.cursor_x - self.cursor_controller.column_offset) as u16;
         let cursor_y = (self.cursor_controller.cursor_y - self.cursor_controller.row_offset) as u16;
         queue!(
             self.editor_contents,
@@ -236,7 +237,8 @@ impl Output {
     }
 
     fn move_cursor(&mut self, direction: KeyCode) {
-        self.cursor_controller.move_cursor(direction, self.editor_rows.number_of_rows());
+        self.cursor_controller
+            .move_cursor(direction, &self.editor_rows);
     }
 }
 
@@ -261,7 +263,8 @@ impl CursorController {
         }
     }
 
-    fn move_cursor(&mut self, direction: KeyCode, number_of_rows: usize) {
+    fn move_cursor(&mut self, direction: KeyCode, editor_rows: &EditorRows) {
+        let numbers_of_rows = editor_rows.number_of_rows();
         match direction {
             KeyCode::Up => {
                 self.cursor_y = self.cursor_y.saturating_sub(1);
@@ -270,12 +273,16 @@ impl CursorController {
                 self.cursor_x = self.cursor_x.saturating_sub(1);
             }
             KeyCode::Down => {
-                if self.cursor_y < number_of_rows {
+                if self.cursor_y < numbers_of_rows {
                     self.cursor_y += 1;
                 }
             }
             KeyCode::Right => {
+                if self.cursor_y < numbers_of_rows
+                    && self.cursor_x < editor_rows.get_row(self.cursor_y).len()
+                {
                     self.cursor_x += 1;
+                }
             }
             KeyCode::Home => {
                 self.cursor_x = 0;
@@ -283,6 +290,13 @@ impl CursorController {
             KeyCode::End => self.cursor_x = self.screen_columns - 1,
             _ => unimplemented!(),
         }
+
+        let row_len = if self.cursor_y < numbers_of_rows {
+            editor_rows.get_row(self.cursor_y).len()
+        } else {
+            0
+        };
+        self.cursor_x = cmp::min(self.cursor_x, row_len);
     }
 
     fn scroll(&mut self) {
