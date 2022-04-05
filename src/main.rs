@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::io::{stdout, Write};
 use std::path::Path;
-use std::thread::sleep;
 use std::time::Duration;
 use std::{cmp, env, fs, io};
 
@@ -346,7 +345,11 @@ impl CursorController {
             KeyCode::Home => {
                 self.cursor_x = 0;
             }
-            KeyCode::End => self.cursor_x = self.screen_columns - 1,
+            KeyCode::End => {
+                if self.cursor_y < numbers_of_rows {
+                    self.cursor_x = editor_rows.get_row(self.cursor_y).len()
+                }
+            },
             _ => unimplemented!(),
         }
 
