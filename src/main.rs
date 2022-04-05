@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::io::{stdout, Write};
 use std::path::Path;
+use std::thread::sleep;
 use std::time::Duration;
 use std::{cmp, env, fs, io};
 
@@ -9,6 +10,7 @@ use crossterm::terminal::ClearType;
 use crossterm::{cursor, event, execute, queue, terminal};
 
 const VERSION: &str = "0.0.1";
+const TAB_STOP: usize = 8;
 
 struct CleanUp;
 
@@ -125,7 +127,7 @@ impl io::Write for EditorContents {
 }
 
 struct EditorRows {
-    row_contents: Vec<Box<str>>,
+    row_contents: Vec<Row>,
 }
 
 impl EditorRows {
@@ -143,7 +145,14 @@ impl EditorRows {
     fn from_file(file: &Path) -> Self {
         let file_content = fs::read_to_string(file).expect("Unable to read file");
         Self {
-            row_contents: file_content.lines().map(|it| it.into()).collect(),
+            row_contents: file_content
+                .lines()
+                .map(|it| {
+                    let mut row = Row::new(it.into(), String::new());
+                    Self::render_row(&mut row);
+                    row
+                })
+                .collect(),
         }
     }
 
@@ -152,7 +161,36 @@ impl EditorRows {
     }
 
     fn get_row(&self, at: usize) -> &str {
+        &self.row_contents[at].row_content
+    }
+
+    fn get_editor_row(&self, at: usize) -> &Row {
         &self.row_contents[at]
+    }
+
+    fn get_render(&self, at: usize) -> &String {
+        &self.row_contents[at].render
+    }
+
+    fn render_row(row: &mut Row) {
+        let mut index = 0;
+        let capacity = row
+            .row_content
+            .chars()
+            .fold(0, |acc, next| acc + if next == '\t' { TAB_STOP } else { 1 });
+        row.render = String::with_capacity(capacity);
+        row.row_content.chars().for_each(|c| {
+            index += 1;
+            if c == '\t' {
+                row.render.push(' ');
+                while index % TAB_STOP != 0 {
+                    row.render.push(' ');
+                    index += 1
+                }
+            } else {
+                row.render.push(c)
+            }
+        })
     }
 }
 
@@ -204,7 +242,7 @@ impl Output {
                     self.editor_contents.push('~');
                 }
             } else {
-                let row = self.editor_rows.get_row(file_row);
+                let row = self.editor_rows.get_render(file_row);
                 let column_offset = self.cursor_controller.column_offset;
                 let len = cmp::min(row.len().saturating_sub(column_offset), screen_columns);
                 let start = if len == 0 { 0 } else { column_offset };
@@ -222,11 +260,11 @@ impl Output {
     }
 
     fn refresh_screen(&mut self) -> crossterm::Result<()> {
-        self.cursor_controller.scroll();
+        self.cursor_controller.scroll(&self.editor_rows);
         queue!(self.editor_contents, cursor::Hide, cursor::MoveTo(0, 0))?;
         self.draw_rows();
         let cursor_x =
-            (self.cursor_controller.cursor_x - self.cursor_controller.column_offset) as u16;
+            (self.cursor_controller.render_x - self.cursor_controller.column_offset) as u16;
         let cursor_y = (self.cursor_controller.cursor_y - self.cursor_controller.row_offset) as u16;
         queue!(
             self.editor_contents,
@@ -250,6 +288,7 @@ struct CursorController {
     screen_rows: usize,
     row_offset: usize,
     column_offset: usize,
+    render_x: usize,
 }
 
 impl CursorController {
@@ -261,6 +300,7 @@ impl CursorController {
             screen_rows: win_size.1,
             row_offset: 0,
             column_offset: 0,
+            render_x: 0,
         }
     }
 
@@ -310,14 +350,44 @@ impl CursorController {
         self.cursor_x = cmp::min(self.cursor_x, row_len);
     }
 
-    fn scroll(&mut self) {
+    fn scroll(&mut self, editor_rows: &EditorRows) {
+        self.render_x = 0;
+        if self.cursor_y < editor_rows.number_of_rows() {
+            self.render_x = self.get_render_x(editor_rows.get_editor_row(self.cursor_y))
+        }
         self.row_offset = cmp::min(self.row_offset, self.cursor_y);
         if self.cursor_y >= self.row_offset + self.screen_rows {
             self.row_offset = self.cursor_y - self.screen_rows + 1;
         }
-        self.column_offset = cmp::min(self.column_offset, self.cursor_x);
-        if self.cursor_x >= self.column_offset + self.screen_columns {
-            self.column_offset = self.cursor_x - self.screen_columns + 1;
+        self.column_offset = cmp::min(self.column_offset, self.render_x);
+        if self.render_x >= self.column_offset + self.screen_columns {
+            self.column_offset = self.render_x - self.screen_columns + 1;
+        }
+    }
+
+    fn get_render_x(&self, row: &Row) -> usize {
+        row.row_content[..self.cursor_x]
+            .chars()
+            .fold(0, |render_x, c| {
+                if c == '\t' {
+                    render_x + (TAB_STOP - 1) - (render_x % TAB_STOP) + 1
+                } else {
+                    render_x + 1
+                }
+            })
+    }
+}
+
+struct Row {
+    row_content: Box<str>,
+    render: String,
+}
+
+impl Row {
+    fn new(row_content: Box<str>, render: String) -> Self {
+        Self {
+            row_content,
+            render,
         }
     }
 }
