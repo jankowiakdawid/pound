@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 use std::io::{stdout, Write};
-use std::path::Path;
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration};
 use std::{cmp, env, fs, io};
 
 use crossterm::event::{Event, KeyCode, KeyEvent};
 use crossterm::terminal::ClearType;
-use crossterm::{cursor, event, execute, queue, terminal};
+use crossterm::{cursor, event, execute, queue, style, terminal};
 
 const VERSION: &str = "0.0.1";
 const TAB_STOP: usize = 8;
@@ -70,10 +70,13 @@ impl Editor {
                 modifiers: event::KeyModifiers::NONE,
             } => {
                 if matches!(val, KeyCode::PageUp) {
-                    self.output.cursor_controller.cursor_y = self.output.cursor_controller.row_offset
+                    self.output.cursor_controller.cursor_y =
+                        self.output.cursor_controller.row_offset
                 } else {
-                    self.output.cursor_controller.cursor_y = cmp::min(self.output.win_size.1 + self.output.cursor_controller.row_offset - 1,
-                    self.output.editor_rows.number_of_rows());
+                    self.output.cursor_controller.cursor_y = cmp::min(
+                        self.output.win_size.1 + self.output.cursor_controller.row_offset - 1,
+                        self.output.editor_rows.number_of_rows(),
+                    );
                 }
                 (0..self.output.win_size.1).for_each(|_| {
                     self.output.move_cursor(if matches!(val, KeyCode::PageUp) {
@@ -82,7 +85,7 @@ impl Editor {
                         KeyCode::Down
                     });
                 })
-            },
+            }
             _ => {}
         }
         Ok(true)
@@ -135,6 +138,7 @@ impl io::Write for EditorContents {
 
 struct EditorRows {
     row_contents: Vec<Row>,
+    filename: Option<PathBuf>,
 }
 
 impl EditorRows {
@@ -144,13 +148,14 @@ impl EditorRows {
         match arg.nth(1) {
             None => Self {
                 row_contents: Vec::new(),
+                filename: None,
             },
-            Some(file) => Self::from_file(file.as_ref()),
+            Some(file) => Self::from_file(file.into()),
         }
     }
 
-    fn from_file(file: &Path) -> Self {
-        let file_content = fs::read_to_string(file).expect("Unable to read file");
+    fn from_file(file: PathBuf) -> Self {
+        let file_content = fs::read_to_string(&file).expect("Unable to read file");
         Self {
             row_contents: file_content
                 .lines()
@@ -160,6 +165,7 @@ impl EditorRows {
                     row
                 })
                 .collect(),
+            filename: Some(file),
         }
     }
 
@@ -211,7 +217,7 @@ struct Output {
 impl Output {
     fn new() -> Self {
         let win_size = terminal::size()
-            .map(|(x, y)| (x as usize, y as usize))
+            .map(|(x, y)| (x as usize, y as usize - 1))
             .unwrap();
 
         Self {
@@ -260,16 +266,51 @@ impl Output {
                 terminal::Clear(ClearType::UntilNewLine)
             )
             .unwrap();
-            if i < screen_rows - 1 {
-                self.editor_contents.push_str("\r\n");
+            self.editor_contents.push_str("\r\n");
+        }
+    }
+
+    fn draw_status_bar(&mut self) {
+        self.editor_contents
+            .push_str(&style::Attribute::Reverse.to_string());
+
+        let info = format!(
+            "{} -- {} lines",
+            self.editor_rows
+                .filename
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .and_then(|name| name.to_str())
+                .unwrap_or("[No name]"),
+            self.editor_rows.number_of_rows()
+        );
+        let info_len = cmp::min(info.len(), self.win_size.0);
+
+        let line_info = format!(
+            "{}/{}",
+            self.cursor_controller.cursor_y + 1,
+            self.editor_rows.number_of_rows(),
+        );
+
+        self.editor_contents.push_str(&info[..info_len]);
+        for i in info_len..self.win_size.0 {
+            if self.win_size.0 - i == line_info.len() {
+                self.editor_contents.push_str(&line_info);
+                break;
+            } else {
+                self.editor_contents.push(' ');
             }
         }
+
+        self.editor_contents
+            .push_str(&style::Attribute::Reset.to_string());
     }
 
     fn refresh_screen(&mut self) -> crossterm::Result<()> {
         self.cursor_controller.scroll(&self.editor_rows);
         queue!(self.editor_contents, cursor::Hide, cursor::MoveTo(0, 0))?;
         self.draw_rows();
+        self.draw_status_bar();
         let cursor_x =
             (self.cursor_controller.render_x - self.cursor_controller.column_offset) as u16;
         let cursor_y = (self.cursor_controller.cursor_y - self.cursor_controller.row_offset) as u16;
@@ -349,7 +390,7 @@ impl CursorController {
                 if self.cursor_y < numbers_of_rows {
                     self.cursor_x = editor_rows.get_row(self.cursor_y).len()
                 }
-            },
+            }
             _ => unimplemented!(),
         }
 
