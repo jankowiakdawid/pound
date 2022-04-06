@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
-use std::time::{Duration};
+use std::time::{Duration, Instant};
 use std::{cmp, env, fs, io};
 
 use crossterm::event::{Event, KeyCode, KeyEvent};
@@ -212,12 +212,13 @@ struct Output {
     editor_rows: EditorRows,
     editor_contents: EditorContents,
     cursor_controller: CursorController,
+    status_message: StatusMessage,
 }
 
 impl Output {
     fn new() -> Self {
         let win_size = terminal::size()
-            .map(|(x, y)| (x as usize, y as usize - 1))
+            .map(|(x, y)| (x as usize, y as usize - 2))
             .unwrap();
 
         Self {
@@ -225,6 +226,7 @@ impl Output {
             editor_rows: EditorRows::new(),
             editor_contents: EditorContents::new(),
             cursor_controller: CursorController::new(win_size),
+            status_message: StatusMessage::new("HELP: CTRL-Q = Quit".into()),
         }
     }
 
@@ -304,13 +306,29 @@ impl Output {
 
         self.editor_contents
             .push_str(&style::Attribute::Reset.to_string());
+        self.editor_contents.push_str("\r\n");
+    }
+
+    fn draw_message_bar(&mut self) {
+        queue!(
+            self.editor_contents,
+            terminal::Clear(ClearType::UntilNewLine),
+        )
+        .unwrap();
+        if let Some(msg) = self.status_message.message() {
+            self.editor_contents
+                .push_str(&msg[..cmp::min(self.win_size.0, msg.len())]);
+        }
     }
 
     fn refresh_screen(&mut self) -> crossterm::Result<()> {
         self.cursor_controller.scroll(&self.editor_rows);
         queue!(self.editor_contents, cursor::Hide, cursor::MoveTo(0, 0))?;
+
         self.draw_rows();
         self.draw_status_bar();
+        self.draw_message_bar();
+
         let cursor_x =
             (self.cursor_controller.render_x - self.cursor_controller.column_offset) as u16;
         let cursor_y = (self.cursor_controller.cursor_y - self.cursor_controller.row_offset) as u16;
@@ -441,6 +459,37 @@ impl Row {
             row_content,
             render,
         }
+    }
+}
+
+struct StatusMessage {
+    message: Option<String>,
+    set_time: Option<Instant>,
+}
+
+impl StatusMessage {
+    fn new(initial_message: String) -> Self {
+        Self {
+            message: Some(initial_message),
+            set_time: Some(Instant::now()),
+        }
+    }
+
+    fn set_message(&mut self, message: String) {
+        self.message = Some(message);
+        self.set_time = Some(Instant::now());
+    }
+
+    fn message(&mut self) -> Option<&String> {
+        self.set_time.and_then(|time| {
+            if time.elapsed() > Duration::from_secs(5) {
+                self.message = None;
+                self.set_time = None;
+                None
+            } else {
+                Some(self.message.as_ref().unwrap())
+            }
+        })
     }
 }
 
