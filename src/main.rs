@@ -93,6 +93,7 @@ impl Editor {
                 self.output
                     .status_message
                     .set_message(format!("{} bytes written to disk", len));
+                self.output.dirty = 0;
             })?,
             KeyEvent {
                 code: code @ (KeyCode::Char(..) | KeyCode::Tab),
@@ -256,6 +257,7 @@ struct Output {
     editor_contents: EditorContents,
     cursor_controller: CursorController,
     status_message: StatusMessage,
+    dirty: u64,
 }
 
 impl Output {
@@ -270,6 +272,7 @@ impl Output {
             editor_contents: EditorContents::new(),
             cursor_controller: CursorController::new(win_size),
             status_message: StatusMessage::new("HELP: CTRL-S = Save | CTRL-Q = Quit".into()),
+            dirty: 0,
         }
     }
 
@@ -320,13 +323,14 @@ impl Output {
             .push_str(&style::Attribute::Reverse.to_string());
 
         let info = format!(
-            "{} -- {} lines",
+            "{} {} -- {} lines",
             self.editor_rows
                 .filename
                 .as_ref()
                 .and_then(|path| path.file_name())
                 .and_then(|name| name.to_str())
                 .unwrap_or("[No name]"),
+            if self.dirty > 0 { "(modified)" } else { "" },
             self.editor_rows.number_of_rows()
         );
         let info_len = cmp::min(info.len(), self.win_size.0);
@@ -397,6 +401,7 @@ impl Output {
             .get_editor_row_mut(self.cursor_controller.cursor_y)
             .insert_char(self.cursor_controller.cursor_x, ch);
         self.cursor_controller.cursor_x += 1;
+        self.dirty += 1;
     }
 }
 
