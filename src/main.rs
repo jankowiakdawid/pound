@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::io::{stdout, Write};
+use std::io::{stdout, ErrorKind, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::{cmp, env, fs, io};
@@ -86,6 +86,14 @@ impl Editor {
                     });
                 })
             }
+            KeyEvent {
+                code: KeyCode::Char('s'),
+                modifiers: event::KeyModifiers::CONTROL,
+            } => self.output.editor_rows.save().map(|len| {
+                self.output
+                    .status_message
+                    .set_message(format!("{} bytes written to disk", len));
+            })?,
             KeyEvent {
                 code: code @ (KeyCode::Char(..) | KeyCode::Tab),
                 modifiers: event::KeyModifiers::NONE | event::KeyModifiers::SHIFT,
@@ -221,6 +229,25 @@ impl EditorRows {
     fn get_editor_row_mut(&mut self, at: usize) -> &mut Row {
         &mut self.row_contents[at]
     }
+
+    fn save(&self) -> io::Result<usize> {
+        match &self.filename {
+            None => Err(io::Error::new(ErrorKind::Other, "No file name specified")),
+            Some(name) => {
+                let mut file = fs::OpenOptions::new().write(true).open(name)?;
+                let contents: String = self
+                    .row_contents
+                    .iter()
+                    .map(|it| it.row_content.as_str())
+                    .collect::<Vec<&str>>()
+                    .join("\n");
+                file.set_len(contents.len() as u64)?;
+                file.write_all(contents.as_bytes())?;
+
+                Ok(contents.as_bytes().len())
+            }
+        }
+    }
 }
 
 struct Output {
@@ -242,7 +269,7 @@ impl Output {
             editor_rows: EditorRows::new(),
             editor_contents: EditorContents::new(),
             cursor_controller: CursorController::new(win_size),
-            status_message: StatusMessage::new("HELP: CTRL-Q = Quit".into()),
+            status_message: StatusMessage::new("HELP: CTRL-S = Save | CTRL-Q = Quit".into()),
         }
     }
 
