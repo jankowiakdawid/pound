@@ -57,14 +57,14 @@ impl Editor {
                 modifiers: event::KeyModifiers::CONTROL,
             } => {
                 if self.output.dirty > 0 && self.quit_times > 0 {
-                     self.output.status_message.set_message(format!(
-                         "WARNING!!! File has unsaved changes. Press Ctrl-Q {} more times to quit.",
-                         self.quit_times
-                     ));
-                     self.quit_times -= 1;
-                     return Ok(true);
+                    self.output.status_message.set_message(format!(
+                        "WARNING!!! File has unsaved changes. Press Ctrl-Q {} more times to quit.",
+                        self.quit_times
+                    ));
+                    self.quit_times -= 1;
+                    return Ok(true);
                 }
-                return Ok(false)
+                return Ok(false);
             }
             KeyEvent {
                 code:
@@ -110,7 +110,7 @@ impl Editor {
             })?,
             KeyEvent {
                 code: key @ (KeyCode::Backspace | KeyCode::Delete),
-                modifiers: event::KeyModifiers::NONE
+                modifiers: event::KeyModifiers::NONE,
             } => {
                 if matches!(key, KeyCode::Delete) {
                     self.output.move_cursor(KeyCode::Right)
@@ -272,6 +272,13 @@ impl EditorRows {
             }
         }
     }
+
+    fn join_adjacent_rows(&mut self, at: usize) {
+        let current_row = self.row_contents.remove(at);
+        let previous_row = self.get_editor_row_mut(at - 1);
+        previous_row.row_content.push_str(&current_row.row_content);
+        Self::render_row(previous_row);
+    }
 }
 
 struct Output {
@@ -431,14 +438,25 @@ impl Output {
         if self.cursor_controller.cursor_y == self.editor_rows.number_of_rows() {
             return;
         }
+        if self.cursor_controller.cursor_y == 0 && self.cursor_controller.cursor_x == 0 {
+            return;
+        }
         let row = self
             .editor_rows
             .get_editor_row_mut(self.cursor_controller.cursor_y);
         if self.cursor_controller.cursor_x > 0 {
             row.delete_char(self.cursor_controller.cursor_x - 1);
             self.cursor_controller.cursor_x -= 1;
-            self.dirty += 1;
+        } else {
+            let previous_row_content = self
+                .editor_rows
+                .get_row(self.cursor_controller.cursor_y - 1);
+            self.cursor_controller.cursor_x = previous_row_content.len();
+            self.editor_rows
+                .join_adjacent_rows(self.cursor_controller.cursor_y);
+            self.cursor_controller.cursor_y -= 1;
         }
+        self.dirty += 1;
     }
 }
 
